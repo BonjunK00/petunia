@@ -1,15 +1,21 @@
 import { ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
-import type { TraefikRouter } from '../types.js';
+import type { TraefikOverview, TraefikRouter, TraefikService } from '../types.js';
 
-function routerIcon(status: string): string {
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+  return res.json() as Promise<T>;
+}
+
+function statusIcon(status: string): string {
   if (status === 'enabled') return '🟢';
   if (status === 'warning') return '🟡';
   return '🔴';
 }
 
 export async function handleStatus(interaction: ChatInputCommandInteraction): Promise<void> {
-  const url = process.env.TRAEFIK_API_URL;
-  if (!url) {
+  const base = process.env.TRAEFIK_API_URL;
+  if (!base) {
     await interaction.reply({
       content: '⚠️ `TRAEFIK_API_URL` 환경 변수가 설정되지 않았습니다.',
       ephemeral: true,
@@ -17,11 +23,16 @@ export async function handleStatus(interaction: ChatInputCommandInteraction): Pr
     return;
   }
 
+  let overview: TraefikOverview;
   let routers: TraefikRouter[];
+  let services: TraefikService[];
+
   try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    routers = (await res.json()) as TraefikRouter[];
+    [overview, routers, services] = await Promise.all([
+      fetchJson<TraefikOverview>(`${base}/api/overview`),
+      fetchJson<TraefikRouter[]>(`${base}/api/http/routers`),
+      fetchJson<TraefikService[]>(`${base}/api/http/services`),
+    ]);
   } catch (err) {
     await interaction.reply({
       content: `⚠️ Traefik API 호출 실패: \`${String(err)}\``,
@@ -35,15 +46,51 @@ export async function handleStatus(interaction: ChatInputCommandInteraction): Pr
     return;
   }
 
-  const lines = routers.map(
-    (r) => `${routerIcon(r.status)} **${r.name}** — ${r.status}\n　\`${r.rule}\``
-  );
+  const serviceMap = new Map(services.map((s) => [s.name, s]));
 
-  const allUp = routers.every((r) => r.status === 'enabled');
+  const dockerRouters = routers.filter((r) => r.provider === 'docker');
+  const internalErrors = routers.filter((r) => r.provider !== 'docker' && r.status !== 'enabled');
+
+  const { routers: ro, services: sv } = overview.http;
+  const description =
+    `**Routers** — total: ${ro.total}, warnings: ${ro.warnings}, errors: ${ro.errors}\n` +
+    `**Services** — total: ${sv.total}, warnings: ${sv.warnings}, errors: ${sv.errors}`;
+
+  const fields = dockerRouters.map((r) => {
+    const svc = serviceMap.get(r.service);
+    const backendLine = svc?.serverStatus
+      ? 'Backend: ' +
+        Object.values(svc.serverStatus)
+          .map((s) => (s === 'UP' ? '🟢' : '🔴'))
+          .join(' ')
+      : '';
+    return {
+      name: `${statusIcon(r.status)} ${r.name}`,
+      value: `\`${r.rule}\`` + (backendLine ? `\n${backendLine}` : ''),
+      inline: true,
+    };
+  });
+
+  if (internalErrors.length > 0) {
+    fields.push({
+      name: '⚠️ Internal Errors',
+      value: internalErrors
+        .map((r) => `🔴 **${r.name}**: ${r.error?.join(', ') ?? r.status}`)
+        .join('\n'),
+      inline: false,
+    });
+  }
+
+  const color =
+    ro.errors > 0 || sv.errors > 0 ? 0xed4245 :
+    ro.warnings > 0 || sv.warnings > 0 ? 0xfee75c :
+    0x57f287;
+
   const embed = new EmbedBuilder()
-    .setTitle('Traefik Router Status')
-    .setDescription(lines.join('\n'))
-    .setColor(allUp ? 0x57f287 : 0xed4245)
+    .setTitle('Traefik Status')
+    .setDescription(description)
+    .addFields(fields)
+    .setColor(color)
     .setTimestamp();
 
   await interaction.reply({ embeds: [embed], ephemeral: true });
