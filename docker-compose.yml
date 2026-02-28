@@ -3,6 +3,8 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    volumes:
+      - ~/.claude:/root/.claude:ro
     networks:
       - app_net
 
