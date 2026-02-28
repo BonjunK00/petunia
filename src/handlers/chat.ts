@@ -1,8 +1,5 @@
 import { Message } from 'discord.js';
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
-
-const execFile = promisify(execFileCb);
+import { spawn } from 'child_process';
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN ?? 'claude';
 const TIMEOUT_MS = 60_000;
@@ -16,20 +13,37 @@ interface ClaudeResult {
   sessionId: string;
 }
 
-async function askClaude(content: string, sessionId?: string): Promise<ClaudeResult> {
-  const args = ['--print', '--output-format', 'json'];
-  if (sessionId) {
-    args.push('--resume', sessionId);
-  }
-  args.push(content);
+function askClaude(content: string, sessionId?: string): Promise<ClaudeResult> {
+  return new Promise((resolve, reject) => {
+    const args = ['--print', '--output-format', 'json'];
+    if (sessionId) args.push('--resume', sessionId);
 
-  const { stdout } = await execFile(CLAUDE_BIN, args, { timeout: TIMEOUT_MS });
+    const child = spawn(CLAUDE_BIN, args, { timeout: TIMEOUT_MS });
 
-  const parsed = JSON.parse(stdout.trim());
-  return {
-    text: parsed.result as string,
-    sessionId: parsed.session_id as string,
-  };
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        return reject(new Error(`claude exited ${code}\nstderr: ${stderr}\nstdout: ${stdout}`));
+      }
+
+      const resultLine = stdout.trim().split('\n')
+        .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+        .find((obj) => obj?.type === 'result');
+
+      if (!resultLine) return reject(new Error(`Unexpected output: ${stdout.slice(0, 200)}`));
+
+      resolve({ text: resultLine.result as string, sessionId: resultLine.session_id as string });
+    });
+
+    child.on('error', reject);
+
+    child.stdin.write(content);
+    child.stdin.end();
+  });
 }
 
 export async function handleChatMessage(message: Message): Promise<void> {
@@ -55,8 +69,8 @@ export async function handleChatMessage(message: Message): Promise<void> {
       : text;
 
     await message.reply(reply);
-  } catch (err) {
-    console.error('Claude error:', err);
+  } catch (err: any) {
+    console.error('Claude error:', err?.message ?? err);
     await message.reply('⚠️ AI 응답 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
   }
 }
