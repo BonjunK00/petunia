@@ -1,0 +1,12 @@
+services:
+  petunia:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - app_net
+
+networks:
+  app_net:
+    external: true
+    name: app_net
