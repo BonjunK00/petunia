@@ -5,6 +5,7 @@ services:
     env_file: .env
     volumes:
       - ~/.claude:/root/.claude:ro
+      - ~/.claude.json:/root/.claude.json:ro
     networks:
       - app_net
 
