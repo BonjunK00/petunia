@@ -6,6 +6,7 @@ services:
     volumes:
       - ~/.claude:/root/.claude
       - ~/.claude.json:/root/.claude.json
+      - /usr/local/bin/claude:/usr/local/bin/claude:ro
     networks:
       - app_net
 
