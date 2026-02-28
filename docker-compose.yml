@@ -4,8 +4,8 @@ services:
     restart: unless-stopped
     env_file: .env
     volumes:
-      - ~/.claude:/root/.claude:ro
-      - ~/.claude.json:/root/.claude.json:ro
+      - ~/.claude:/root/.claude
+      - ~/.claude.json:/root/.claude.json
     networks:
       - app_net
 
