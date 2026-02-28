@@ -67,7 +67,7 @@ export async function handleStatus(interaction: ChatInputCommandInteraction): Pr
     return {
       name: `${statusIcon(r.status)} ${r.name}`,
       value: `\`${r.rule}\`` + (backendLine ? `\n${backendLine}` : ''),
-      inline: true,
+      inline: false,
     };
   });
 
@@ -93,5 +93,5 @@ export async function handleStatus(interaction: ChatInputCommandInteraction): Pr
     .setColor(color)
     .setTimestamp();
 
-  await interaction.reply({ embeds: [embed], ephemeral: true });
+  await interaction.reply({ embeds: [embed] });
 }
